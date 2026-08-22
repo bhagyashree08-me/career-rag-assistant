@@ -1,0 +1,13 @@
+streamlit
+pypdf
+python-dotenv
+requests
+beautifulsoup4
+
+langchain-core
+langchain-text-splitters
+langchain-chroma
+langchain-huggingface
+langchain-google-genai
+
+sentence-transformers

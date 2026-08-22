@@ -1,0 +1,34 @@
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables / API keys
+.env
+.env.local
+.env.production
+.env.development
+
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE
+.vscode/
+.idea/
+
+# Local databases / generated vector stores
+*.db
+*.sqlite
+chroma/
+chroma_db/
+vectorstore/
+faiss_index/
+
+# Uploaded / generated files
+uploads/
+outputs/
+data/my_resume.pdf
+
+# OS
+.DS_Store
+Thumbs.db
