@@ -27,7 +27,7 @@ faiss_index/
 # Uploaded / generated files
 uploads/
 outputs/
-data/my_resume.pdf
+data/*.pdf
 
 # OS
 .DS_Store
