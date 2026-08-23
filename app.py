@@ -1,62 +1,67 @@
 import streamlit as st
+from pathlib import Path
+import tempfile
+
 from pypdf import PdfReader
 
 from src.rag import retrieve_documents, generate_answer
-from src.job_extract import extract_job_from_url
+from src.job_extractor import extract_job_from_url
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
-    page_title="Career RAG Assistant",
-    page_icon="AI",
+    page_title="Career RAG",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 
 # ============================================================
-# CSS
+# CUSTOM CSS
 # ============================================================
 
 st.markdown(
     """
     <style>
 
+    /* ---------- GLOBAL ---------- */
+
     .stApp {
         background: #F8F9FA;
+        color: #111827;
     }
 
     .block-container {
-        max-width: 1420px;
-        padding: 28px 42px 50px;
+        max-width: 1400px;
+        padding: 28px 42px 50px 42px;
     }
 
-    #MainMenu,
-    footer,
-    header {
+    header[data-testid="stHeader"] {
+        background: #F8F9FA;
+    }
+
+    /* Hide Streamlit branding */
+    #MainMenu {
         visibility: hidden;
     }
 
-    h1, h2, h3 {
-        color: #111827 !important;
+    footer {
+        visibility: hidden;
     }
 
-    p, label {
-        color: #6B7280 !important;
-    }
+    /* ---------- HEADER ---------- */
 
-    /* TOP BAR */
-
-    .topbar {
+    .app-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding-bottom: 22px;
-        margin-bottom: 30px;
+        padding: 4px 0 22px 0;
         border-bottom: 1px solid #E5E7EB;
+        margin-bottom: 28px;
     }
 
     .brand-area {
@@ -66,135 +71,430 @@ st.markdown(
     }
 
     .brand-icon {
-        width: 40px;
-        height: 40px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #2563EB, #6D28D9);
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        background: linear-gradient(
+            135deg,
+            #6D28D9,
+            #2563EB
+        );
         color: white;
         display: flex;
         align-items: center;
         justify-content: center;
+        font-size: 13px;
         font-weight: 800;
-        font-size: 12px;
     }
 
-    .brand-name {
-        color: #111827;
-        font-size: 18px;
+    .brand-title {
+        font-size: 20px;
         font-weight: 800;
         line-height: 1.1;
+        color: #111827;
     }
 
-    .brand-desc {
-        color: #6B7280;
+    .brand-subtitle {
         font-size: 11px;
+        color: #6B7280;
         margin-top: 4px;
     }
 
-    /* CARDS */
+    .new-analysis {
+        background: #2563EB;
+        color: white;
+        border-radius: 9px;
+        padding: 10px 17px;
+        font-size: 12px;
+        font-weight: 700;
+        text-align: center;
+    }
+
+    /* ---------- TITLES ---------- */
+
+    .page-title {
+        font-size: 25px;
+        font-weight: 800;
+        color: #111827;
+        margin-bottom: 5px;
+    }
+
+    .page-subtitle {
+        font-size: 13px;
+        color: #6B7280;
+        margin-bottom: 22px;
+    }
+
+    .section-title {
+        font-size: 18px;
+        font-weight: 800;
+        color: #111827;
+        margin-bottom: 5px;
+    }
+
+    .section-subtitle {
+        font-size: 12px;
+        color: #6B7280;
+        margin-bottom: 18px;
+    }
+
+    /* ---------- CARDS ---------- */
 
     .card {
         background: white;
         border: 1px solid #E5E7EB;
-        border-radius: 14px;
+        border-radius: 16px;
         padding: 22px;
+        box-shadow: 0 2px 8px rgba(17, 24, 39, 0.03);
     }
 
-    /* STATUS */
+    /* ---------- SCORE ---------- */
+
+    .score-card {
+        min-height: 540px;
+    }
+
+    .score-heading {
+        font-size: 20px;
+        font-weight: 800;
+        color: #111827;
+        margin-bottom: 5px;
+    }
+
+    .score-subtitle {
+        font-size: 12px;
+        color: #6B7280;
+        line-height: 1.5;
+        margin-bottom: 18px;
+    }
 
     .status {
         display: inline-flex;
         align-items: center;
         gap: 7px;
-        padding: 6px 10px;
-        border-radius: 999px;
         background: #F3F4F6;
-        color: #6B7280;
+        border: 1px solid #E5E7EB;
+        border-radius: 999px;
+        padding: 6px 10px;
         font-size: 11px;
-        font-weight: 600;
+        color: #6B7280;
+        margin-bottom: 30px;
     }
 
     .status-dot {
         width: 7px;
         height: 7px;
-        border-radius: 50%;
         background: #9CA3AF;
+        border-radius: 50%;
     }
 
-    .status-ready .status-dot {
-        background: #22C55E;
+    .score-heading-small {
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .08em;
+        color: #6B7280;
+        margin-bottom: 14px;
     }
 
-    /* INFO PANEL */
+    .score-circle {
+        width: 190px;
+        height: 190px;
+        border-radius: 50%;
+        background:
+            conic-gradient(
+                #6D28D9 0deg,
+                #6D28D9 0deg,
+                #EDE9FE 0deg,
+                #EDE9FE 360deg
+            );
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 12px auto 25px auto;
+    }
 
-    .info-title {
-        font-size: 13px;
+    .score-circle-inner {
+        width: 154px;
+        height: 154px;
+        border-radius: 50%;
+        background: white;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .score-number {
+        font-size: 42px;
         font-weight: 800;
         color: #111827;
-        margin-bottom: 6px;
+        line-height: 1;
     }
 
-    .info-text {
+    .score-label {
+        font-size: 11px;
+        color: #6B7280;
+        margin-top: 7px;
+    }
+
+    .score-description {
+        text-align: center;
+        color: #6B7280;
         font-size: 12px;
         line-height: 1.6;
-        color: #6B7280;
+        max-width: 280px;
+        margin: auto;
     }
 
-    /* BUTTON */
+    /* ---------- INPUT CARDS ---------- */
 
-    div.stButton > button {
+    .input-card {
+        background: white;
+        border: 1px solid #E5E7EB;
+        border-radius: 15px;
+        padding: 20px;
+        min-height: 170px;
+    }
+
+    .input-title {
+        font-size: 16px;
+        font-weight: 800;
+        color: #111827;
+        margin-bottom: 5px;
+    }
+
+    .input-description {
+        font-size: 12px;
+        color: #6B7280;
+        line-height: 1.5;
+        margin-bottom: 15px;
+    }
+
+    .upload-note {
+        font-size: 11px;
+        color: #9CA3AF;
+        margin-top: 7px;
+    }
+
+    /* ---------- RADIO ---------- */
+
+    div[data-testid="stRadio"] {
+        margin-top: -4px;
+        margin-bottom: 8px;
+    }
+
+    div[data-testid="stRadio"] label {
+        font-size: 12px !important;
+    }
+
+    /* ---------- TEXTAREA ---------- */
+
+    textarea {
+        border-radius: 10px !important;
+    }
+
+    /* ---------- BUTTON ---------- */
+
+    .stButton > button {
         width: 100%;
-        height: 42px;
-        border-radius: 9px;
+        height: 46px;
+        border-radius: 10px;
         border: none;
         background: #2563EB;
         color: white;
+        font-size: 13px;
         font-weight: 700;
     }
 
-    div.stButton > button:hover {
+    .stButton > button:hover {
         background: #1D4ED8;
         color: white;
     }
 
-    /* INPUTS */
+    /* ---------- METRICS ---------- */
 
-    .stTextArea textarea,
-    .stTextInput input {
-        background: white !important;
-        border: 1px solid #D1D5DB !important;
-        border-radius: 9px !important;
-        color: #111827 !important;
-    }
-
-    [data-testid="stFileUploader"] {
-        background: white;
-        border: 1px dashed #CBD5E1;
-        border-radius: 10px;
-    }
-
-    /* RESULT CARDS */
-
-    .result-card {
+    .metric-card {
         background: white;
         border: 1px solid #E5E7EB;
-        border-radius: 12px;
+        border-radius: 14px;
         padding: 18px;
-        min-height: 110px;
+        min-height: 115px;
     }
 
-    .result-label {
+    .metric-value {
+        font-size: 27px;
+        font-weight: 800;
+        color: #111827;
+    }
+
+    .metric-label {
+        font-size: 11px;
+        color: #6B7280;
+        margin-top: 5px;
+        margin-bottom: 10px;
+    }
+
+    .metric-bar {
+        width: 100%;
+        height: 6px;
+        background: #EDE9FE;
+        border-radius: 99px;
+        overflow: hidden;
+    }
+
+    .metric-fill {
+        height: 100%;
+        background: #6D28D9;
+        border-radius: 99px;
+    }
+
+    /* ---------- SKILLS ---------- */
+
+    .skill-box {
+        background: white;
+        border: 1px solid #E5E7EB;
+        border-radius: 14px;
+        padding: 20px;
+        min-height: 150px;
+    }
+
+    .skill-heading {
         font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .07em;
+        color: #6B7280;
+        margin-bottom: 13px;
+    }
+
+    .skill-pill {
+        display: inline-block;
+        padding: 7px 10px;
+        margin: 0 5px 7px 0;
+        border-radius: 8px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .skill-match {
+        background: #EEF2FF;
+        color: #4338CA;
+    }
+
+    .skill-gap {
+        background: #F3F4F6;
+        color: #6B7280;
+    }
+
+    /* ---------- INSIGHTS ---------- */
+
+    .insight-card {
+        background: white;
+        border: 1px solid #E5E7EB;
+        border-radius: 14px;
+        padding: 18px;
+        min-height: 105px;
+    }
+
+    .insight-label {
+        font-size: 9px;
         font-weight: 800;
         letter-spacing: .08em;
         color: #6D28D9;
         margin-bottom: 10px;
     }
 
-    .result-text {
-        font-size: 13px;
+    .insight-text {
+        font-size: 12px;
         color: #374151;
         line-height: 1.5;
+    }
+
+    /* ---------- STEPS ---------- */
+
+    .step-card {
+        background: white;
+        border: 1px solid #E5E7EB;
+        border-radius: 14px;
+        padding: 14px 18px;
+        margin-bottom: 9px;
+        font-size: 12px;
+        color: #374151;
+    }
+
+    .step-number {
+        color: #6D28D9;
+        font-weight: 800;
+        margin-right: 10px;
+    }
+
+    /* ---------- CHAT ---------- */
+
+    .chat-card {
+        background: white;
+        border: 1px solid #E5E7EB;
+        border-radius: 14px;
+        padding: 20px;
+    }
+
+    .chat-label {
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .08em;
+        color: #6D28D9;
+    }
+
+    .chat-title {
+        font-size: 18px;
+        font-weight: 800;
+        margin-top: 4px;
+        margin-bottom: 18px;
+    }
+
+    .user-message {
+        background: #2563EB;
+        color: white;
+        padding: 10px 13px;
+        border-radius: 12px 12px 3px 12px;
+        font-size: 12px;
+        margin-left: 35px;
+        margin-bottom: 12px;
+    }
+
+    .ai-message {
+        background: #F3F4F6;
+        color: #374151;
+        padding: 11px 13px;
+        border-radius: 12px 12px 12px 3px;
+        font-size: 12px;
+        line-height: 1.5;
+        margin-right: 15px;
+    }
+
+    /* ---------- SOURCES ---------- */
+
+    .source-card {
+        background: #F3F4F6;
+        border-radius: 12px;
+        padding: 14px 16px;
+    }
+
+    .source-title {
+        font-size: 12px;
+        font-weight: 800;
+        color: #374151;
+        margin-bottom: 8px;
+    }
+
+    .source-item {
+        font-size: 11px;
+        color: #6B7280;
+        margin-top: 6px;
+    }
+
+    /* ---------- ALERTS ---------- */
+
+    .stAlert {
+        border-radius: 10px;
     }
 
     </style>
@@ -207,11 +507,8 @@ st.markdown(
 # SESSION STATE
 # ============================================================
 
-if "analysis_done" not in st.session_state:
-    st.session_state.analysis_done = False
-
-if "answer" not in st.session_state:
-    st.session_state.answer = ""
+if "analysis_result" not in st.session_state:
+    st.session_state.analysis_result = None
 
 if "resume_text" not in st.session_state:
     st.session_state.resume_text = ""
@@ -219,111 +516,92 @@ if "resume_text" not in st.session_state:
 if "job_text" not in st.session_state:
     st.session_state.job_text = ""
 
+if "job_source" not in st.session_state:
+    st.session_state.job_source = "Paste Text"
+
 
 # ============================================================
-# TOP BAR
+# HEADER
 # ============================================================
 
-top_left, top_center, top_right = st.columns(
-    [1.8, 1.4, 0.7],
-    vertical_alignment="center"
-)
-
-with top_left:
-
-    st.markdown(
-        """
+st.markdown(
+    """
+    <div class="app-header">
         <div class="brand-area">
             <div class="brand-icon">AI</div>
-
             <div>
-                <div class="brand-name">
-                    Career RAG Assistant
-                </div>
-
-                <div class="brand-desc">
-                    AI-powered Resume & Career Analysis
+                <div class="brand-title">Career RAG</div>
+                <div class="brand-subtitle">
+                    AI-powered Resume & Job Match Analysis
                 </div>
             </div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
-
-with top_center:
-
-    nav1, nav2, nav3 = st.columns(3)
-
-    with nav1:
-        st.button("Dashboard", disabled=True)
-
-    with nav2:
-        st.button("Analysis", disabled=True)
-
-    with nav3:
-        st.button("AI Chat", disabled=True)
-
-
-with top_right:
-
-    st.markdown(
-        """
-        <div class="status">
-            <span class="status-dot"></span>
-            RAG Ready
+        <div class="new-analysis">
+            + New Analysis
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-st.write("")
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # ============================================================
-# INTRODUCTION
+# INPUT / SCORE AREA
 # ============================================================
 
 left, right = st.columns(
-    [1, 2.3],
+    [0.85, 1.65],
     gap="large"
 )
 
+
+# ============================================================
+# LEFT — SCORE
+# ============================================================
 
 with left:
 
     st.markdown(
         """
-        <div class="card">
+        <div class="card score-card">
 
-            <h3>Career RAG Assistant</h3>
-
-            <div class="info-text">
-                Analyze a resume against a target job description
-                using Retrieval-Augmented Generation.
+            <div class="score-heading">
+                Your Career Match
             </div>
 
-            <br>
-
-            <div class="info-title">
-                Knowledge Base
+            <div class="score-subtitle">
+                AI-powered resume and job description analysis.
             </div>
 
-            <div class="info-text">
-                Resume profile + World Economic Forum
-                Future of Jobs Report 2025.
+            <div class="status">
+                <span class="status-dot"></span>
+                Waiting for analysis
             </div>
 
-            <br>
-
-            <div class="info-title">
-                Analysis
+            <div class="score-heading-small">
+                MAIN SCORE
             </div>
 
-            <div class="info-text">
-                The system retrieves relevant career evidence
-                before generating the final analysis.
+            <div class="score-circle">
+
+                <div class="score-circle-inner">
+
+                    <div class="score-number">
+                        0%
+                    </div>
+
+                    <div class="score-label">
+                        Overall Match
+                    </div>
+
+                </div>
+
+            </div>
+
+            <div class="score-description">
+                Upload your resume and provide a job description
+                to calculate your match.
             </div>
 
         </div>
@@ -332,115 +610,147 @@ with left:
     )
 
 
+# ============================================================
+# RIGHT — INPUTS
+# ============================================================
+
 with right:
 
-    st.subheader("Career Match Analysis")
-
-    st.caption(
-        "Compare your resume against a specific job description."
+    st.markdown(
+        '<div class="page-title">Career Match Analysis</div>',
+        unsafe_allow_html=True,
     )
 
-    resume_col, job_col = st.columns(
-        2,
-        gap="large"
+    st.markdown(
+        '<div class="page-subtitle">Compare your resume against a specific job description.</div>',
+        unsafe_allow_html=True,
     )
 
+    resume_col, job_col = st.columns(2, gap="large")
 
-    # ========================================================
+
+    # --------------------------------------------------------
     # RESUME
-    # ========================================================
+    # --------------------------------------------------------
 
     with resume_col:
 
         st.markdown(
-            '<div class="card">',
-            unsafe_allow_html=True
-        )
-
-        st.markdown("### Resume")
-
-        st.caption(
-            "Upload your current resume as a PDF."
+            """
+            <div class="input-card">
+                <div class="input-title">Resume</div>
+                <div class="input-description">
+                    Upload your current resume.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         resume_file = st.file_uploader(
-            "Resume PDF",
+            "Upload resume",
             type=["pdf"],
             label_visibility="collapsed",
+            key="resume_upload",
         )
 
-        st.caption("PDF format")
+        st.markdown(
+            '<div class="upload-note">PDF • Maximum 200MB</div>',
+            unsafe_allow_html=True,
+        )
 
-        st.markdown("</div>", unsafe_allow_html=True)
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # JOB DESCRIPTION
-    # ========================================================
+    # --------------------------------------------------------
 
     with job_col:
 
         st.markdown(
-            '<div class="card">',
-            unsafe_allow_html=True
-        )
-
-        st.markdown("### Job Description")
-
-        st.caption(
-            "Paste text, upload a PDF, or provide a public URL."
+            """
+            <div class="input-card">
+                <div class="input-title">Job Description</div>
+                <div class="input-description">
+                    Paste text, upload a PDF, or provide a job URL.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         job_source = st.radio(
             "Job description source",
-            ["Text", "PDF", "URL"],
+            [
+                "Paste Text",
+                "Upload PDF",
+                "Job URL",
+            ],
             horizontal=True,
-            label_visibility="collapsed",
+            key="job_source_radio",
         )
 
-        job_text = ""
-        job_pdf = None
-        job_url = ""
+        st.session_state.job_source = job_source
 
-
-        if job_source == "Text":
+        if job_source == "Paste Text":
 
             job_text = st.text_area(
                 "Job description",
-                placeholder=(
-                    "Paste the job description here..."
-                ),
+                placeholder="Paste the complete job description here...",
                 height=145,
                 label_visibility="collapsed",
+                key="job_text_input",
             )
 
+            st.session_state.job_text = job_text
 
-        elif job_source == "PDF":
+
+        elif job_source == "Upload PDF":
 
             job_pdf = st.file_uploader(
-                "Job description PDF",
+                "Upload job description PDF",
                 type=["pdf"],
-                key="job_description_pdf",
                 label_visibility="collapsed",
+                key="job_pdf_upload",
             )
+
+            if job_pdf:
+
+                reader = PdfReader(job_pdf)
+
+                pages = []
+
+                for page in reader.pages:
+                    pages.append(
+                        page.extract_text() or ""
+                    )
+
+                st.session_state.job_text = "\n".join(pages)
 
 
         else:
 
             job_url = st.text_input(
                 "Job URL",
-                placeholder="https://...",
+                placeholder="https://example.com/job-description",
                 label_visibility="collapsed",
+                key="job_url_input",
             )
 
-        st.markdown("</div>", unsafe_allow_html=True)
+            if job_url:
 
+                st.session_state.job_text = job_url
+
+
+    # --------------------------------------------------------
+    # ANALYZE
+    # --------------------------------------------------------
 
     st.write("")
 
-    analyze_clicked = st.button(
+    analyze = st.button(
         "Analyze Career Match",
         type="primary",
+        use_container_width=True,
     )
 
 
@@ -448,11 +758,7 @@ with right:
 # ANALYSIS
 # ============================================================
 
-if analyze_clicked:
-
-    # --------------------------------------------------------
-    # VALIDATION
-    # --------------------------------------------------------
+if analyze:
 
     if resume_file is None:
 
@@ -461,106 +767,85 @@ if analyze_clicked:
         st.stop()
 
 
-    if job_source == "Text" and not job_text.strip():
+    # --------------------------------------------------------
+    # READ RESUME
+    # --------------------------------------------------------
 
-        st.error("Please enter the job description.")
+    try:
 
-        st.stop()
+        resume_reader = PdfReader(resume_file)
 
+        resume_pages = []
 
-    if job_source == "PDF" and job_pdf is None:
+        for page in resume_reader.pages:
+
+            resume_pages.append(
+                page.extract_text() or ""
+            )
+
+        resume_text = "\n".join(resume_pages)
+
+        st.session_state.resume_text = resume_text
+
+    except Exception as e:
 
         st.error(
-            "Please upload the job description PDF."
+            f"Could not read the resume: {e}"
         )
 
         st.stop()
 
 
-    if job_source == "URL" and not job_url.strip():
-
-        st.error("Please enter the job URL.")
-
-        st.stop()
-
-
     # --------------------------------------------------------
-    # PROCESSING
+    # JOB TEXT
     # --------------------------------------------------------
 
-    with st.spinner(
-        "Extracting documents and running RAG analysis..."
-    ):
+    if job_source == "Job URL":
+
+        url = st.session_state.job_text.strip()
+
+        if not url:
+
+            st.error("Please provide a job URL.")
+
+            st.stop()
 
         try:
 
-            # ------------------------------------------------
-            # Resume extraction
-            # ------------------------------------------------
+            with st.spinner("Extracting job description..."):
 
-            resume_reader = PdfReader(resume_file)
+                job_text = extract_job_from_url(url)
 
-            resume_text = "\n".join(
-                page.extract_text() or ""
-                for page in resume_reader.pages
-            ).strip()
-
-
-            if not resume_text:
-
-                raise ValueError(
-                    "Could not extract readable text "
-                    "from the uploaded resume."
-                )
-
-
-            # ------------------------------------------------
-            # Job PDF
-            # ------------------------------------------------
-
-            if job_source == "PDF":
-
-                job_reader = PdfReader(job_pdf)
-
-                job_text = "\n".join(
-                    page.extract_text() or ""
-                    for page in job_reader.pages
-                ).strip()
-
-
-                if not job_text:
-
-                    raise ValueError(
-                        "Could not extract readable text "
-                        "from the job description PDF."
-                    )
-
-
-            # ------------------------------------------------
-            # Job URL
-            # ------------------------------------------------
-
-            elif job_source == "URL":
-
-                job_text = extract_job_from_url(
-                    job_url.strip()
-                )
-
-
-            # ------------------------------------------------
-            # Store input
-            # ------------------------------------------------
-
-            st.session_state.resume_text = resume_text
             st.session_state.job_text = job_text
 
+        except Exception as e:
 
-            # ------------------------------------------------
-            # Analysis question
-            # ------------------------------------------------
+            st.error(
+                f"Could not extract the job description: {e}"
+            )
 
-            question = f"""
-Analyze the candidate resume against the target job description.
+            st.stop()
+
+
+    else:
+
+        job_text = st.session_state.job_text.strip()
+
+        if not job_text:
+
+            st.error(
+                "Please provide a job description."
+            )
+
+            st.stop()
+
+
+    # --------------------------------------------------------
+    # BUILD QUESTION
+    # --------------------------------------------------------
+
+    question = f"""
+Analyze the candidate against the target job description.
 
 CANDIDATE RESUME
 ================
@@ -574,142 +859,68 @@ TARGET JOB DESCRIPTION
 {job_text}
 
 
-TASK
-====
+Provide:
 
-Provide an evidence-based career match analysis.
-
-Evaluate:
-
-1. Matching skills
-2. Skills or capabilities not clearly demonstrated
+1. Overall assessment
+2. Matching skills
 3. Experience alignment
-4. ATS-relevant observations
-5. Market alignment
-6. Overall match assessment
-7. Recommended improvements
-
-Important:
-
-The uploaded resume and job description are direct user-provided
-evidence and may be used for the comparison.
-
-Use the retrieved knowledge-base documents to support
-career and market-related claims.
-
-Do not assume that absence from the resume proves that
-the candidate does not know a skill.
+4. Resume gaps
+5. ATS-relevant observations
+6. Market alignment
+7. Priority improvements
+8. Recommended next steps
 """
 
 
-            # ------------------------------------------------
-            # Retrieval
-            # ------------------------------------------------
+    # --------------------------------------------------------
+    # RAG
+    # --------------------------------------------------------
+
+    try:
+
+        with st.spinner(
+            "Analyzing resume and job description..."
+        ):
 
             documents = retrieve_documents(
                 question,
-                k=5
+                k=5,
             )
-
-
-            # ------------------------------------------------
-            # Generation
-            # ------------------------------------------------
 
             answer = generate_answer(
                 question,
-                documents
+                documents,
             )
 
+        st.session_state.analysis_result = answer
 
-            st.session_state.answer = answer
-            st.session_state.analysis_done = True
+    except Exception as e:
 
+        st.error(
+            f"Analysis failed: {e}"
+        )
 
-            st.rerun()
-
-
-        except Exception as error:
-
-            st.error(
-                f"Analysis failed: {error}"
-            )
+        st.stop()
 
 
 # ============================================================
 # RESULTS
 # ============================================================
 
-if st.session_state.analysis_done:
+if st.session_state.analysis_result:
 
     st.divider()
 
-    st.subheader("Analysis Results")
-
-    st.caption(
-        "Generated using the uploaded resume, target job "
-        "description, and retrieved career knowledge."
+    st.markdown(
+        '<div class="page-title">Analysis Results</div>',
+        unsafe_allow_html=True,
     )
 
+    st.markdown(
+        '<div class="page-subtitle">Evidence-based comparison of your resume and target role.</div>',
+        unsafe_allow_html=True,
+    )
 
-    # ========================================================
-    # INPUT SUMMARY
-    # ========================================================
-
-    summary_col1, summary_col2 = st.columns(2)
-
-
-    with summary_col1:
-
-        st.markdown(
-            """
-            <div class="result-card">
-
-                <div class="result-label">
-                    RESUME
-                </div>
-
-                <div class="result-text">
-                    Resume successfully extracted and analyzed.
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    with summary_col2:
-
-        st.markdown(
-            """
-            <div class="result-card">
-
-                <div class="result-label">
-                    JOB DESCRIPTION
-                </div>
-
-                <div class="result-text">
-                    Target job description successfully processed.
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    st.write("")
-
-
-    # ========================================================
-    # AI ANALYSIS
-    # ========================================================
-
-    st.subheader("AI Career Analysis")
-
-    with st.container(border=True):
-
-        st.markdown(
-            st.session_state.answer
-        )
+    st.markdown(
+        st.session_state.analysis_result
+    )
