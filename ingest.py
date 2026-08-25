@@ -1,124 +1,88 @@
 from pathlib import Path
 
-from pypdf import PdfReader
-from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 
-
-DATA_DIR = Path("data")
-CHROMA_DIR = Path("chroma_db")
-
-COLLECTION_NAME = "career_documents"
-
-EMBEDDING_MODEL = (
-    "sentence-transformers/all-MiniLM-L6-v2"
+from src.document_processor import (
+    load_pdfs,
+    split_documents,
 )
 
 
-def load_pdfs():
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
-    documents = []
+PROJECT_ROOT = Path(__file__).resolve().parent
 
-    for pdf_file in DATA_DIR.glob("*.pdf"):
+CHROMA_DIR = PROJECT_ROOT / "chroma_db"
 
-        print(f"Loading: {pdf_file.name}")
+COLLECTION_NAME = "career_documents"
 
-        reader = PdfReader(pdf_file)
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-        for page_number, page in enumerate(reader.pages):
 
-            text = page.extract_text() or ""
-
-            if text.strip():
-
-                documents.append(
-                    Document(
-                        page_content=text,
-                        metadata={
-                            "source": pdf_file.name,
-                            "page": page_number + 1,
-                        },
-                    )
-                )
-
-    return documents
-
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
-    # ========================================================
-    # 1. LOAD DOCUMENTS
-    # ========================================================
+    print("=" * 60)
+    print("CAREER RAG — DOCUMENT INGESTION")
+    print("=" * 60)
+
+    # --------------------------------------------------------
+    # LOAD DOCUMENTS
+    # --------------------------------------------------------
+
+    print("\n[1/4] Loading PDF documents...")
 
     documents = load_pdfs()
 
     print(
-        f"\nTotal pages loaded: {len(documents)}"
+        f"Loaded {len(documents)} pages."
     )
 
     if not documents:
 
         raise RuntimeError(
-            "No PDF files were found in the data directory."
+            "No readable PDF pages were found."
         )
 
+    # --------------------------------------------------------
+    # SPLIT DOCUMENTS
+    # --------------------------------------------------------
 
-    # ========================================================
-    # 2. SPLIT DOCUMENTS
-    # ========================================================
+    print("\n[2/4] Splitting documents...")
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150,
-    )
-
-    chunks = splitter.split_documents(
-        documents
-    )
+    chunks = split_documents(documents)
 
     print(
-        f"Total chunks created: {len(chunks)}"
+        f"Created {len(chunks)} document chunks."
     )
 
+    # --------------------------------------------------------
+    # EMBEDDINGS
+    # --------------------------------------------------------
 
-    # ========================================================
-    # 3. EMBEDDINGS
-    # ========================================================
-
-    print(
-        "\nLoading embedding model..."
-    )
+    print("\n[3/4] Loading embedding model...")
 
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL
     )
 
-    print(
-        "Embedding model loaded."
-    )
+    print("Embedding model loaded.")
 
+    # --------------------------------------------------------
+    # CHROMA
+    # --------------------------------------------------------
 
-    # ========================================================
-    # 4. CREATE VECTOR DATABASE
-    # ========================================================
+    print("\n[4/4] Creating Chroma vector database...")
 
-    print(
-        "\nCreating Chroma vector database..."
-    )
-
-    # Delete previous local database before rebuilding.
-    if CHROMA_DIR.exists():
-
-        import shutil
-
-        shutil.rmtree(CHROMA_DIR)
-
-        print(
-            "Previous Chroma database removed."
-        )
-
+    # Delete/recreate behavior is intentionally avoided here.
+    # The database should be deleted manually when a completely
+    # fresh rebuild is required.
 
     vectorstore = Chroma.from_documents(
         documents=chunks,
@@ -127,63 +91,47 @@ def main():
         collection_name=COLLECTION_NAME,
     )
 
+    print("\n" + "=" * 60)
+    print("INGESTION COMPLETE")
+    print("=" * 60)
 
-    print(
-        f"Vector database created at: {CHROMA_DIR}"
-    )
+    print(f"Vector database: {CHROMA_DIR}")
+    print(f"Collection: {COLLECTION_NAME}")
+    print(f"Vectors created: {len(chunks)}")
 
-    print(
-        f"Total vectors: {len(chunks)}"
-    )
+    # --------------------------------------------------------
+    # TEST RETRIEVAL
+    # --------------------------------------------------------
 
-
-    # ========================================================
-    # 5. TEST RETRIEVAL
-    # ========================================================
-
-    print(
-        "\nTesting retrieval..."
-    )
+    print("\nTesting retrieval...")
 
     results = vectorstore.similarity_search(
         "What skills are important for future jobs?",
         k=3,
     )
 
+    print("\nTop results:")
+    print("-" * 60)
 
-    print(
-        "\nTop retrieved results:"
-    )
+    for index, result in enumerate(results, start=1):
 
-    print(
-        "=" * 60
-    )
-
-
-    for i, result in enumerate(
-        results,
-        1
-    ):
+        print(f"\nResult {index}")
 
         print(
-            f"\nResult {i}"
+            f"Source: "
+            f"{result.metadata.get('source', 'Unknown')}"
         )
 
         print(
-            f"Source: {result.metadata.get('source')}"
-        )
-
-        print(
-            f"Page: {result.metadata.get('page')}"
+            f"Page: "
+            f"{result.metadata.get('page', 'Unknown')}"
         )
 
         print(
             result.page_content[:500]
         )
 
-        print(
-            "-" * 60
-        )
+        print("-" * 60)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+#job_extractor.py
 import requests
 from bs4 import BeautifulSoup
 
@@ -6,9 +7,14 @@ def extract_job_from_url(url):
     """
     Extract readable text from a public job-page URL.
 
-    Some websites, including platforms with anti-bot
-    protection, may block automated requests.
+    Some websites may block automated requests,
+    require JavaScript rendering, or require authentication.
     """
+
+    if not url or not url.strip():
+        raise ValueError("Job URL cannot be empty.")
+
+    url = url.strip()
 
     headers = {
         "User-Agent": (
@@ -18,19 +24,27 @@ def extract_job_from_url(url):
         )
     }
 
-    response = requests.get(
-        url,
-        headers=headers,
-        timeout=20,
-    )
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=20,
+        )
 
-    response.raise_for_status()
+        response.raise_for_status()
+
+    except requests.RequestException as exc:
+        raise ValueError(
+            f"Could not access the job URL: {exc}"
+        ) from exc
 
     soup = BeautifulSoup(
         response.text,
-        "html.parser"
+        "html.parser",
     )
 
+    # Remove elements that normally do not contain
+    # useful job-description text.
     for element in soup([
         "script",
         "style",
@@ -62,7 +76,8 @@ def extract_job_from_url(url):
         raise ValueError(
             "The webpage did not provide enough readable "
             "job-description text. The website may be "
-            "blocking automated extraction."
+            "blocking automated extraction or may require "
+            "JavaScript/authentication."
         )
 
     return cleaned_text

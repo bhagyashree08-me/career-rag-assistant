@@ -1,3 +1,4 @@
+#document_processor.py
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -5,34 +6,57 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
-DATA_DIR = Path("data")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
 
 
 def load_pdfs():
+    """
+    Load all PDFs from the data/ directory.
+
+    Each PDF page becomes a LangChain Document with:
+    - source: PDF filename
+    - page: 1-based page number
+    """
 
     documents = []
 
-    for pdf_file in DATA_DIR.glob("*.pdf"):
+    if not DATA_DIR.exists():
+        raise FileNotFoundError(
+            f"Data directory not found: {DATA_DIR}"
+        )
+
+    pdf_files = list(DATA_DIR.glob("*.pdf"))
+
+    if not pdf_files:
+        raise FileNotFoundError(
+            f"No PDF files found in: {DATA_DIR}"
+        )
+
+    for pdf_file in pdf_files:
 
         print(f"Loading: {pdf_file.name}")
 
-        reader = PdfReader(pdf_file)
+        reader = PdfReader(str(pdf_file))
 
-        for page_number, page in enumerate(reader.pages):
+        for page_number, page in enumerate(reader.pages, start=1):
 
             text = page.extract_text() or ""
 
-            if text.strip():
+            text = text.strip()
 
-                documents.append(
-                    Document(
-                        page_content=text,
-                        metadata={
-                            "source": pdf_file.name,
-                            "page": page_number + 1,
-                        },
-                    )
+            if not text:
+                continue
+
+            documents.append(
+                Document(
+                    page_content=text,
+                    metadata={
+                        "source": pdf_file.name,
+                        "page": page_number,
+                    },
                 )
+            )
 
     return documents
 
@@ -44,4 +68,6 @@ def split_documents(documents):
         chunk_overlap=150,
     )
 
-    return splitter.split_documents(documents)
+    chunks = splitter.split_documents(documents)
+
+    return chunks

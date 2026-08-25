@@ -1,3 +1,4 @@
+#rag.py
 import os
 from pathlib import Path
 
@@ -47,7 +48,7 @@ def get_vector_store():
     return Chroma(
         persist_directory=CHROMA_DIR,
         collection_name=COLLECTION_NAME,
-        embedding_function=embeddings
+        embedding_function=embeddings,
     )
 
 
@@ -66,7 +67,7 @@ def get_llm():
 
     return ChatGoogleGenerativeAI(
         model=GEMINI_MODEL,
-        google_api_key=api_key
+        google_api_key=api_key,
     )
 
 
@@ -80,7 +81,7 @@ def retrieve_documents(question, k=5):
 
     documents = vector_store.similarity_search(
         question,
-        k=k
+        k=k,
     )
 
     return documents
@@ -101,17 +102,13 @@ def build_context(documents):
 
         source = doc.metadata.get(
             "source",
-            "Unknown"
+            "Unknown",
         )
 
         page = doc.metadata.get(
             "page",
-            "Unknown"
+            "Unknown",
         )
-
-        # PyPDFLoader normally stores zero-based page numbers.
-        if isinstance(page, int):
-            page = page + 1
 
         context_parts.append(
             f"""
@@ -144,27 +141,40 @@ def generate_answer(question, documents):
 
     prompt = build_prompt(
         question,
-        context
+        context,
     )
 
     llm = get_llm()
 
     response = llm.invoke(prompt)
 
-    if isinstance(response.content, list):
+    content = response.content
+
+    # Gemini may return a string or structured content.
+    if isinstance(content, str):
+
+        return content.strip()
+
+    if isinstance(content, list):
 
         text_parts = []
 
-        for block in response.content:
+        for block in content:
 
             if isinstance(block, dict):
 
-                if block.get("type") == "text":
+                text = block.get("text")
 
-                    text_parts.append(
-                        block.get("text", "")
-                    )
+                if text:
+                    text_parts.append(str(text))
 
-        return "\n".join(text_parts).strip()
+            elif isinstance(block, str):
 
-    return str(response.content).strip()
+                text_parts.append(block)
+
+        result = "\n".join(text_parts).strip()
+
+        if result:
+            return result
+
+    return str(content).strip()
