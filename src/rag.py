@@ -1,5 +1,5 @@
-#rag.py
 import os
+from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,7 +29,23 @@ GEMINI_MODEL = "gemini-3.6-flash"
 # ============================================================
 # EMBEDDINGS
 # ============================================================
+#
+# PERFORMANCE FIX:
+# HuggingFaceEmbeddings loads the sentence-transformers model
+# weights into memory. The previous version rebuilt this from
+# scratch on every single question (get_vector_store() called
+# get_embeddings() fresh each time retrieve_documents() ran) --
+# that repeated model load was almost certainly the dominant
+# source of the slow responses, on top of actual retrieval and
+# generation time.
+#
+# @lru_cache(maxsize=1) turns this into a singleton: the model
+# loads once per running process (i.e. once per Streamlit
+# session, not once per question), and every later call reuses
+# the same in-memory object.
+# ============================================================
 
+@lru_cache(maxsize=1)
 def get_embeddings():
 
     return HuggingFaceEmbeddings(
@@ -41,6 +57,7 @@ def get_embeddings():
 # VECTOR DATABASE
 # ============================================================
 
+@lru_cache(maxsize=1)
 def get_vector_store():
 
     embeddings = get_embeddings()
@@ -56,7 +73,14 @@ def get_vector_store():
 # GEMINI
 # ============================================================
 
+@lru_cache(maxsize=1)
 def get_llm():
+    """
+    Plain Gemini client, no tools bound. Cached as a singleton
+    for the same reason as get_embeddings() -- avoids rebuilding
+    the client on every question. Also used as a fallback if
+    grounded generation (below) fails for any reason.
+    """
 
     api_key = os.getenv("GOOGLE_API_KEY")
 
@@ -69,6 +93,27 @@ def get_llm():
         model=GEMINI_MODEL,
         google_api_key=api_key,
     )
+
+
+@lru_cache(maxsize=1)
+def get_grounded_llm():
+    """
+    Same Gemini client as get_llm(), with Google Search
+    grounding bound as a tool.
+
+    When Gemini judges that live web context would help answer
+    the question, it performs the search itself server-side and
+    folds the results directly into its response -- no separate
+    search API key, and no manual search/tool-execution loop
+    needed on our side.
+
+    This is what lets the analysis draw on more than just the
+    two local PDFs (resume + Future of Jobs report) -- e.g.
+    current role expectations, company context, or terminology
+    trends that aren't present in either PDF.
+    """
+
+    return get_llm().bind_tools([{"google_search": {}}])
 
 
 # ============================================================
@@ -132,11 +177,27 @@ def generate_answer(question, documents):
 
     context = build_context(documents)
 
+    # PREVIOUSLY: if the local Chroma knowledge base had no
+    # relevant chunks, this function returned a canned refusal
+    # string immediately and never even called the LLM -- so
+    # the analysis was capped by whatever happened to be in
+    # my_resume.pdf / future_of_jobs.pdf, with no fallback.
+    #
+    # NOW: an empty local knowledge base no longer blocks the
+    # analysis. The model still has the resume + job description
+    # text (supplied directly in the question) and, via grounded
+    # generation below, live web search -- so it can keep going
+    # instead of giving up.
+
     if not context:
 
-        return (
-            "I could not find relevant information in the "
-            "current knowledge base."
+        context = (
+            "No matching content was found in the local "
+            "knowledge base (my_resume.pdf / future_of_jobs.pdf) "
+            "for this question. Base the analysis on the resume "
+            "and job description supplied directly in the "
+            "question below, plus any relevant web search "
+            "results, instead."
         )
 
     prompt = build_prompt(
@@ -144,9 +205,25 @@ def generate_answer(question, documents):
         context,
     )
 
-    llm = get_llm()
+    # Try grounded generation first so the analysis can draw on
+    # current web information, not just the two local PDFs.
+    # Falls back to the plain (non-grounded) model if grounding
+    # fails for any reason -- e.g. the tool isn't supported by
+    # the current API/model version, or a transient network
+    # issue -- so a search hiccup never breaks the analysis
+    # outright.
 
-    response = llm.invoke(prompt)
+    try:
+
+        llm = get_grounded_llm()
+
+        response = llm.invoke(prompt)
+
+    except Exception:
+
+        llm = get_llm()
+
+        response = llm.invoke(prompt)
 
     content = response.content
 
