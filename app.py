@@ -479,6 +479,27 @@ def extract_pdf_text(uploaded_file):
     return "\n".join(pages).strip()
 
 
+# Very long resumes/job descriptions bloat the prompt sent to
+# Gemini on every request -- more tokens generally means slower
+# generation, with no real analysis benefit past a certain
+# point. Capping this is a real, previously-invisible source of
+# slow responses for longer documents.
+MAX_RESUME_CHARS = 8000
+MAX_JOB_CHARS = 6000
+
+
+def truncate_for_prompt(text, max_chars, label):
+
+    if not text or len(text) <= max_chars:
+        return text
+
+    return (
+        text[:max_chars]
+        + f"\n\n[{label} truncated for length -- "
+        f"showing the first {max_chars} characters.]"
+    )
+
+
 def build_analysis_question(
     resume_text,
     job_text,
@@ -486,6 +507,18 @@ def build_analysis_question(
     custom_question=None,
 ):
     """Build a mode-specific RAG question."""
+
+    resume_text = truncate_for_prompt(
+        resume_text,
+        MAX_RESUME_CHARS,
+        "Resume",
+    )
+
+    job_text = truncate_for_prompt(
+        job_text,
+        MAX_JOB_CHARS,
+        "Job description",
+    )
 
     base = f"""
 CANDIDATE RESUME
@@ -1023,7 +1056,12 @@ else:
 resume_ready = resume_file is not None
 job_ready = bool(job_text_current.strip())
 
-ready = resume_ready and job_ready
+question_ready = True
+
+if analysis_mode == "Ask a Career Question":
+    question_ready = bool(custom_question.strip())
+
+ready = resume_ready and job_ready and question_ready
 
 
 st.divider()
@@ -1068,10 +1106,18 @@ analyze = st.button(
 
 if not ready:
 
-    st.caption(
-        "Upload a resume and provide a job description "
-        "to activate analysis."
-    )
+    if resume_ready and job_ready and not question_ready:
+
+        st.caption(
+            "Enter a question above to activate analysis."
+        )
+
+    else:
+
+        st.caption(
+            "Upload a resume and provide a job description "
+            "to activate analysis."
+        )
 
 
 # ============================================================
@@ -1199,9 +1245,10 @@ if analyze:
 
         if not documents:
 
-            st.warning(
-                "No relevant knowledge-base documents "
-                "were retrieved."
+            st.info(
+                "No closely relevant content found in the local "
+                "knowledge base for this question -- bringing in "
+                "live web research instead."
             )
 
         with st.spinner(
