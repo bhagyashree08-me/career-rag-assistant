@@ -10,6 +10,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from src.prompts import build_prompt
+from src.document_processor import load_pdfs, split_documents
 
 
 load_dotenv()
@@ -85,10 +86,32 @@ def get_vector_store():
 
     embeddings = get_embeddings()
 
-    return Chroma(
+    # Use the existing Chroma database if it already exists.
+    chroma_path = Path(CHROMA_DIR)
+
+    if chroma_path.exists():
+        return Chroma(
+            persist_directory=CHROMA_DIR,
+            collection_name=COLLECTION_NAME,
+            embedding_function=embeddings,
+        )
+
+    # If Chroma does not exist, build it automatically
+    # from the PDFs currently present in data/.
+    documents = load_pdfs()
+
+    if not documents:
+        raise RuntimeError(
+            "No PDF documents were found in the data directory."
+        )
+
+    chunks = split_documents(documents)
+
+    return Chroma.from_documents(
+        documents=chunks,
+        embedding=embeddings,
         persist_directory=CHROMA_DIR,
         collection_name=COLLECTION_NAME,
-        embedding_function=embeddings,
     )
 
 
